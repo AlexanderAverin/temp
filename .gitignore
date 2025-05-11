@@ -1,0 +1,7 @@
+integral
+*.o
+bin
+old.txt
+.vscode
+functions.txt
+in.txt

@@ -5,8 +5,6 @@
 #include <math.h>
 #include "src/parser/ast.h"
 
-#include "lexer.h"
-
 // Ограничение на количество константных значений в секции .data
 #define MAX_CONSTANTS 100
 #define EPSILON 1e-10  // Эпсилон для сравнения чисел с плавающей точкой
@@ -17,12 +15,11 @@ int const_count = 0;
 
 // Прототипы функций
 static int add_constant(double value);
+static char* parse_token(char *str, char *token, int max_len);
 static Node* build_ast_from_rpn(const char *rpn);
 static void generate_node_asm_code(FILE *fp, Node* node);
 static void generate_function_asm_code(FILE *fp, Node* ast, const char* func_name);
 static void generate_asm_code(FILE *fp, Node* f1_ast, Node* f2_ast, Node* f3_ast);
-
-// static void debug_lexer(const char* input);
 
 // Функция для добавления константы в буфер
 static int add_constant(double value) {
@@ -44,95 +41,170 @@ static int add_constant(double value) {
     exit(EXIT_FAILURE);
 }
 
-// Функция для построения AST из польской обратной записи с использованием лексера
-static Node* build_ast_from_rpn(const char *rpn) {
-    Lexer lexer;
-    lexer_init(&lexer, rpn);
+// Функция для парсинга токена из польской обратной записи
+static char* parse_token(char *str, char *token, int max_len) {
+    int i = 0;
     
-    Node* stack[50];  // Стек для узлов
-    int top = -1;     // Индекс вершины стека
+    // Пропускаем пробелы
+    while (*str && isspace(*str)) str++;
     
-    while (lexer.current_token.type != TOKEN_EOF) {
-        switch (lexer.current_token.type) {
-            case TOKEN_NUMBER:
-                stack[++top] = create_constant_node(lexer.current_token.value);
-                break;
-                
-            case TOKEN_VARIABLE:
-                stack[++top] = create_variable_node();
-                break;
-                
-            case TOKEN_CONSTANT:
-                if (strcmp(lexer.current_token.name, "pi") == 0) {
-                    stack[++top] = create_constant_node(3.14159265358979323846);
-                } else if (strcmp(lexer.current_token.name, "e") == 0) {
-                    stack[++top] = create_constant_node(2.71828182845904523536);
-                } else {
-                    fprintf(stderr, "Error: Unknown constant '%s' at line %d, column %d\n",
-                            lexer.current_token.name, lexer.current_token.line, lexer.current_token.column);
-                    exit(EXIT_FAILURE);
-                }
-                break;
-                
-            case TOKEN_OPERATOR:
-                if (top < 1) {
-                    fprintf(stderr, "Error: Not enough operands for operator at line %d, column %d\n",
-                            lexer.current_token.line, lexer.current_token.column);
-                    exit(EXIT_FAILURE);
-                }
-                
-                Node* right = stack[top--];
-                Node* left = stack[top--];
-                
-                stack[++top] = create_binary_op_node(lexer.current_token.op, left, right);
-                break;
-                
-            case TOKEN_FUNCTION:
-                if (top < 0) {
-                    fprintf(stderr, "Error: Not enough operands for function '%s' at line %d, column %d\n",
-                            lexer.current_token.name, lexer.current_token.line, lexer.current_token.column);
-                    exit(EXIT_FAILURE);
-                }
-                
-                Node* operand = stack[top--];
-                
-                if (strcmp(lexer.current_token.name, "sin") == 0) {
-                    stack[++top] = create_unary_op_node(OP_SIN, operand);
-                } else if (strcmp(lexer.current_token.name, "cos") == 0) {
-                    stack[++top] = create_unary_op_node(OP_COS, operand);
-                } else if (strcmp(lexer.current_token.name, "tan") == 0) {
-                    stack[++top] = create_unary_op_node(OP_TAN, operand);
-                } else if (strcmp(lexer.current_token.name, "ctg") == 0) {
-                    stack[++top] = create_unary_op_node(OP_CTG, operand);
-                } else {
-                    fprintf(stderr, "Error: Unknown function '%s' at line %d, column %d\n",
-                            lexer.current_token.name, lexer.current_token.line, lexer.current_token.column);
-                    free_ast(operand);
-                    exit(EXIT_FAILURE);
-                }
-                break;
-                
-            case TOKEN_ERROR:
-                fprintf(stderr, "Error: Unknown token '%s' at line %d, column %d\n",
-                        lexer.current_token.name, lexer.current_token.line, lexer.current_token.column);
-                exit(EXIT_FAILURE);
-                break;
-                
-            default:
-                fprintf(stderr, "Error: Unexpected token type at line %d, column %d\n",
-                        lexer.current_token.line, lexer.current_token.column);
-                exit(EXIT_FAILURE);
+    if (!*str) return NULL;  // Конец строки
+    
+    // Если это число
+    if (isdigit(*str) || *str == '.' || *str == '-') {
+        while (*str && !isspace(*str) && i < max_len - 1) {
+            token[i++] = *str++;
         }
-        
-        lexer_next_token(&lexer);
+    } 
+    // Если это операция или переменная
+    else {
+        while (*str && !isspace(*str) && i < max_len - 1) {
+            token[i++] = *str++;
+        }
     }
     
-    if (top != 0) {
-        fprintf(stderr, "Error: Invalid RPN expression (too many operands or not enough operators)\n");
+    token[i] = '\0';
+    return str;
+}
+
+// Функция для построения AST из польской обратной записи
+static Node* build_ast_from_rpn(const char *rpn) {
+    char token[64];  // Уменьшаем размер до 64 байт
+    char *str = strdup(rpn);
+    if (!str) {
+        fprintf(stderr, "Error: Failed to allocate memory for string\n");
         exit(EXIT_FAILURE);
     }
     
-    return stack[0];
+    char *curr = str;
+    Node* stack[50];  // Уменьшаем размер стека до 50
+    int top = -1;
+    
+    while ((curr = parse_token(curr, token, sizeof(token)))) {
+        if (isdigit(token[0]) || token[0] == '.' || 
+            (token[0] == '-' && isdigit(token[1]))) {
+            // Число
+            double value = atof(token);
+            stack[++top] = create_constant_node(value);
+        } else if (strcmp(token, "x") == 0) {
+            // Переменная
+            stack[++top] = create_variable_node();
+        } else if (strcmp(token, "pi") == 0) {
+            // Константа π
+            stack[++top] = create_constant_node(3.14159265358979323846);
+        } else if (strcmp(token, "e") == 0) {
+            // Константа e
+            stack[++top] = create_constant_node(2.71828182845904523536);
+        } else if (strcmp(token, "+") == 0) {
+            // Сложение
+            if (top >= 1) {
+                Node* right = stack[top--];
+                Node* left = stack[top--];
+                stack[++top] = create_binary_op_node(OP_ADD, left, right);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for +)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "-") == 0) {
+            // Вычитание
+            if (top >= 1) {
+                Node* right = stack[top--];
+                Node* left = stack[top--];
+                stack[++top] = create_binary_op_node(OP_SUB, left, right);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for -)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "*") == 0) {
+            // Умножение
+            if (top >= 1) {
+                Node* right = stack[top--];
+                Node* left = stack[top--];
+                stack[++top] = create_binary_op_node(OP_MUL, left, right);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for *)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "/") == 0) {
+            // Деление
+            if (top >= 1) {
+                Node* right = stack[top--];
+                Node* left = stack[top--];
+                stack[++top] = create_binary_op_node(OP_DIV, left, right);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for /)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "^") == 0) {
+            // Возведение в степень
+            if (top >= 1) {
+                Node* right = stack[top--];
+                Node* left = stack[top--];
+                stack[++top] = create_binary_op_node(OP_POW, left, right);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for ^)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "sin") == 0) {
+            // Синус
+            if (top >= 0) {
+                Node* operand = stack[top--];
+                stack[++top] = create_unary_op_node(OP_SIN, operand);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for sin)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "cos") == 0) {
+            // Косинус
+            if (top >= 0) {
+                Node* operand = stack[top--];
+                stack[++top] = create_unary_op_node(OP_COS, operand);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for cos)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "tan") == 0) {
+            // Тангенс
+            if (top >= 0) {
+                Node* operand = stack[top--];
+                stack[++top] = create_unary_op_node(OP_TAN, operand);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for tan)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else if (strcmp(token, "ctg") == 0) {
+            // Котангенс
+            if (top >= 0) {
+                Node* operand = stack[top--];
+                stack[++top] = create_unary_op_node(OP_CTG, operand);
+            } else {
+                fprintf(stderr, "Error: Invalid RPN expression (not enough operands for ctg)\n");
+                free(str);
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            fprintf(stderr, "Error: Unknown token '%s'\n", token);
+            free(str);
+            exit(EXIT_FAILURE);
+        }
+    }
+    
+    free(str);
+    
+    if (top == 0) {
+        return stack[top];
+    } else {
+        fprintf(stderr, "Error: Invalid RPN expression (too many operands or operators)\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 // Генерация ассемблерного кода для узла AST
@@ -304,7 +376,7 @@ static void generate_asm_code(FILE *fp, Node* f1_ast, Node* f2_ast, Node* f3_ast
     generate_function_asm_code(fp, f2_ast, "f2");
     generate_function_asm_code(fp, f3_ast, "f3");
     
-    // Генерируем производные - используем уже созданныое AST
+    // Генерируем производные - используем уже созданные AST
     generate_function_asm_code(fp, df1_ast, "df1");
     generate_function_asm_code(fp, df2_ast, "df2");
     generate_function_asm_code(fp, df3_ast, "df3");
@@ -314,26 +386,6 @@ static void generate_asm_code(FILE *fp, Node* f1_ast, Node* f2_ast, Node* f3_ast
     free_ast(df2_ast);
     free_ast(df3_ast);
 }
-
-// Вспомогательная функция для отладки лексера
-// void debug_lexer(const char* input) {
-//     printf("Debug lexer for input: %s\n", input);
-    
-//     Lexer lexer;
-//     lexer_init(&lexer, input);
-    
-//     char buffer[100];
-//     while (lexer.current_token.type != TOKEN_EOF) {
-//         printf("  %s at line %d, column %d\n", 
-//                token_to_string(&lexer.current_token, buffer, sizeof(buffer)),
-//                lexer.current_token.line, 
-//                lexer.current_token.column);
-        
-//         lexer_next_token(&lexer);
-//     }
-    
-//     printf("  %s\n", token_to_string(&lexer.current_token, buffer, sizeof(buffer)));
-// }
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
@@ -385,11 +437,6 @@ int main(int argc, char *argv[]) {
     }
     
     fclose(input_fp);
-    
-    // Отладка лексера
-    // debug_lexer(rpn1);
-    // debug_lexer(rpn2);
-    // debug_lexer(rpn3);
     
     // Строим AST для каждого выражения
     Node* f1_ast = build_ast_from_rpn(rpn1);

@@ -1,7 +1,9 @@
 integral
 *.o
 bin
-old.txt
+
 .vscode
+
+old.txt
 functions.txt
 in.txt

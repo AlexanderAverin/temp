@@ -1,4 +1,3 @@
-# Makefile
 CFLAGS ?= -O2 -g
 CFLAGS += -std=gnu99
 CFLAGS += -Wall -Werror -Wformat-security -Wignored-qualifiers -Winit-self \
@@ -10,7 +9,7 @@ CFLAGS += -fsanitize=undefined -fsanitize-undefined-trap-on-error
 CC += -m32 -no-pie -fno-pie
 LDLIBS = -lm
 
-# Источники
+# src
 SRC_DIR = src
 ASM_DIR = $(SRC_DIR)/asm
 CLI_DIR = $(SRC_DIR)/cli
@@ -20,7 +19,7 @@ PARSER_DIR = $(SRC_DIR)/parser
 OBJS = integral.o $(SRC_DIR)/solver.o $(SRC_DIR)/intagrate.o \
 	$(CLI_DIR)/cmdline.o $(ASM_DIR)/functions.o
 
-# Усложненный вариант с генератором ассемблера
+# Усложненный вариант
 GEN_ASM = generator
 GEN_ASM_OBJS = $(GEN_ASM).o $(PARSER_DIR)/ast.o
 
@@ -84,11 +83,11 @@ integral_generated: integral.c $(SRC_DIR)/solver.o $(SRC_DIR)/intagrate.o \
 
 # Тесты для root и integral
 test: integral
-	@echo "Testing root function..."
+	@echo "Testing root function:"
 	./integral --test-root 1:2:0.0:2.0:0.0001:1.0
 	./integral --test-root 1:3:0.0:2.0:0.0001:0.5
 	./integral --test-root 2:3:0.0:2.0:0.0001:1.5
-	@echo "Testing integral function..."
+	@echo "Testing integral function:"
 	./integral --test-integral 1:0.0:1.0:0.0001:2.5
 	./integral --test-integral 2:0.0:1.0:0.0001:0.16667
 	./integral --test-integral 3:0.0:1.0:0.0001:0.33333

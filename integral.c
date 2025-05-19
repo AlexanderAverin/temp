@@ -8,7 +8,6 @@
 #include "src/declarations.h"
 #include "src/cli/cmdline.h"
 
-// Внешние функции, генерируемые из asm
 extern double f1(double x);
 extern double f2(double x);
 extern double f3(double x);
@@ -120,17 +119,60 @@ void find_intersection_points_with_iterations(Figure* fig, double eps1, RootFind
     *count = 0;
     *iterations = 0;
     
-    // Находим точки пересечения f1 и f2
+    // 1. Пытаемся найти точки пересечения f1 и f2
     int iters1 = 0;
     points[*count] = rf->solve(&fig->f1, &fig->f2, fig->a, fig->b, eps1, &iters1);
     (*count)++;
     
-    // Находим точки пересечения f1 и f3
+    // 2. Пытаемся найти точки пересечения f1 и f3
     int iters2 = 0;
-    points[*count] = rf->solve(&fig->f1, &fig->f3, fig->a, fig->b, eps1, &iters2);
+    
+    // Проверяем знаки функций на границах для f1 и f3
+    double f1_at_a = evaluate(&fig->f1, fig->a);
+    double f3_at_a = evaluate(&fig->f3, fig->a);
+    double f1_diff_f3_at_a = f1_at_a - f3_at_a;
+    
+    double f1_at_b = evaluate(&fig->f1, fig->b);
+    double f3_at_b = evaluate(&fig->f3, fig->b);
+    double f1_diff_f3_at_b = f1_at_b - f3_at_b;
+    
+    // Если знаки разности различны, ищем корень на заданном интервале
+    if (f1_diff_f3_at_a * f1_diff_f3_at_b <= 0) {
+        points[*count] = rf->solve(&fig->f1, &fig->f3, fig->a, fig->b, eps1, &iters2);
+    } 
+    // Иначе проверяем, есть ли корень в отрицательной области
+    else if (fabs(f1_at_a) > 1e-6 && fabs(f3_at_a) > 1e-6) {
+        // Пробуем найти корень на расширенном интервале, но только если он есть
+        // Проверяем точку -1.0
+        double test_x = -1.0;
+        double f1_at_test = evaluate(&fig->f1, test_x);
+        double f3_at_test = evaluate(&fig->f3, test_x);
+        
+        if ((f1_at_test - f3_at_test) * f1_diff_f3_at_a <= 0) {
+            // Ищем корень между test_x и fig->a
+            points[*count] = rf->solve(&fig->f1, &fig->f3, test_x, fig->a, eps1, &iters2);
+        } 
+        else {
+            // Ищем корень в более отрицательной области
+            double extended_a = -4.0;
+            double f1_at_extended = evaluate(&fig->f1, extended_a);
+            double f3_at_extended = evaluate(&fig->f3, extended_a);
+            
+            if ((f1_at_extended - f3_at_extended) * (f1_at_test - f3_at_test) <= 0) {
+                points[*count] = rf->solve(&fig->f1, &fig->f3, extended_a, test_x, eps1, &iters2);
+            } else {
+                // Корень не найден, берем обычный интервал
+                points[*count] = rf->solve(&fig->f1, &fig->f3, fig->a, fig->b, eps1, &iters2);
+            }
+        }
+    } else {
+        // Если нет очевидных признаков корня, используем обычный интервал
+        points[*count] = rf->solve(&fig->f1, &fig->f3, fig->a, fig->b, eps1, &iters2);
+    }
+    
     (*count)++;
     
-    // Находим точки пересечения f2 и f3
+    // 3. Пытаемся найти точки пересечения f2 и f3
     int iters3 = 0;
     points[*count] = rf->solve(&fig->f2, &fig->f3, fig->a, fig->b, eps1, &iters3);
     (*count)++;
@@ -139,16 +181,14 @@ void find_intersection_points_with_iterations(Figure* fig, double eps1, RootFind
     *iterations = iters1 + iters2 + iters3;
     
     // Сортируем точки
-    for (int i = 1; i < *count; i++) {
-        double key = points[i];
-        int j = i - 1;
-        
-        while (j >= 0 && points[j] > key) {
-            points[j + 1] = points[j];
-            j--;
+    for (int i = 0; i < *count; i++) {
+        for (int j = i + 1; j < *count; j++) {
+            if (points[i] > points[j]) {
+                double temp = points[i];
+                points[i] = points[j];
+                points[j] = temp;
+            }
         }
-        
-        points[j + 1] = key;
     }
 }
 
@@ -161,7 +201,7 @@ double calculate_area(Figure* fig, double eps, RootFinder* rf, Integrator* integ
     double intersection_points[3]; // Максимум 3 точки пересечения
     int count = 0;
     
-    double eps1 = 0.00001;  // Выбрано на основе анализа погрешностей
+    double eps1 = 0.000001;  // Выбрано на основе анализа погрешностей
     find_intersection_points(fig, eps1, rf, intersection_points, &count);
     
     if (count < 2) {
@@ -183,16 +223,31 @@ double calculate_area(Figure* fig, double eps, RootFinder* rf, Integrator* integ
         double f2_val = evaluate(&fig->f2, x_mid);
         double f3_val = evaluate(&fig->f3, x_mid);
         
-        // Находим верхнюю и нижнюю функции на этом интервале
+        // Находим верхнюю (максимальную) и нижнюю (минимальную) функции
+        double max_val = f1_val;
+        double min_val = f1_val;
         Function* upper = &fig->f1;
         Function* lower = &fig->f1;
-        
-        // Используем f1_val для сравнения
-        if (f2_val > f1_val) upper = &fig->f2;
-        else if (f2_val < f1_val) lower = &fig->f2;
-        
-        if (f3_val > evaluate(upper, x_mid)) upper = &fig->f3;
-        else if (f3_val < evaluate(lower, x_mid)) lower = &fig->f3;
+
+        // Проверяем f2
+        if (f2_val > max_val) {
+            max_val = f2_val;
+            upper = &fig->f2;
+        }
+        if (f2_val < min_val) {
+            min_val = f2_val;
+            lower = &fig->f2;
+        }
+
+        // Проверяем f3
+        if (f3_val > max_val) {
+            max_val = f3_val;
+            upper = &fig->f3;
+        }
+        if (f3_val < min_val) {
+            min_val = f3_val;
+            lower = &fig->f3;
+        }
         
         // Создаем функцию разности для интегрирования
         Function diff;
@@ -204,7 +259,7 @@ double calculate_area(Figure* fig, double eps, RootFinder* rf, Integrator* integ
         set_difference_functions(upper, lower);
         
         // Вычисляем интеграл с точностью ε₂
-        double eps2 = 0.00017;  // Выбрано на основе анализа погрешностей
+        double eps2 = 0.000001;  // Выбрано на основе анализа погрешностей
         double segment_area = integ->integrate(&diff, a, b, eps2);
         
         area += segment_area;
